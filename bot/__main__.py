@@ -4,8 +4,9 @@ import asyncio
 from pyrogram import idle
 from . import bot, ass
 
-# Tiny health-check web server for Koyeb
+# ────── Tiny aiohttp health-check server (required for Koyeb HTTP health check) ──────
 from aiohttp import web
+
 async def health(request):
     return web.Response(text="BanAll Bot is alive and ready to destroy!")
 
@@ -18,13 +19,12 @@ async def web_server():
     port = int(os.environ.get('PORT', 8000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print(f"Health server running → http://0.0.0.0:{port}/health")
+    print(f"Health server running on port {port} → /health")
 
-# Safe start with session cleanup + retry (your original logic, kept because it’s solid)
+# ────── Safe start with session cleanup + retry (your proven fix) ──────
 async def safe_start(client):
-    max_retries = 5
     session_file = f"{client.name}.session"
-    for attempt in range(1, max_retries + 1):
+    for attempt in range(1, 6):
         try:
             if os.path.exists(session_file):
                 os.remove(session_file)
@@ -34,24 +34,22 @@ async def safe_start(client):
             return
         except Exception as e:
             print(f"{client.name} attempt {attempt} failed: {e}")
-            if attempt < max_retries:
+            if attempt < 5:
                 await asyncio.sleep(5 * attempt)
-    raise RuntimeError(f"Failed to start {client.name} after {max_retries} attempts")
+    raise RuntimeError(f"Failed to start {client.name} after 5 attempts")
 
-# Main entry point
+# ────── Main ──────
 async def main():
-    # Start web server + bot(s) in parallel
     tasks = [web_server(), safe_start(bot)]
-    if ass:  # ass is None if PYRO_SESSION disabled
+    if ass:  # Only starts if PYRO_SESSION is set
         tasks.append(safe_start(ass))
     
     await asyncio.gather(*tasks)
-    
     print("BanAll bot is now ONLINE and unstoppable!")
-    await idle()  # Keeps everything alive forever
+    await idle()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        print("BanAll bot stopped gracefully.")
+        print("Bot stopped gracefully.")
