@@ -4,3 +4,4 @@ Tgcrypto
 pyrogram==2.0.106
 PySocks
 python-dotenv
+aiohttp
