@@ -1,94 +1,96 @@
+# bot/__init__.py
 import asyncio
-
-from pyrogram.errors.exceptions.flood_420 import FloodWait
-from pyrogram import Client,filters
-from pyrogram.types import *
-from .config import Config
 import logging
-from pyrogram.errors import (
-    ChatAdminRequired
-)
+from pyrogram import Client, filters
+from pyrogram.errors import FloodWait, ChatAdminRequired
+from .config import Config
+
+# ────────────────────── Logging Setup ──────────────────────
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logging.getLogger("pyrogram").setLevel(logging.WARNING)
 
-if Config.PYRO_SESSION:
-   ass=Client(api_id=Config.TELEGRAM_APP_ID,api_hash=Config.TELEGRAM_APP_HASH,session_name=Config.PYRO_SESSION)   
-
+# ────────────────────── Client Creation (Pyrogram v2.0+) ──────────────────────
+# Bot client (always created if BOT_TOKEN exists)
+bot = None
 if Config.TELEGRAM_TOKEN:
-   bot=Client(":memory:",api_id=Config.TELEGRAM_APP_ID,api_hash=Config.TELEGRAM_APP_HASH,bot_token=Config.TELEGRAM_TOKEN)
+    bot = Client(
+        name="banall_bot",                    # Required in v2.0+
+        api_id=Config.TELEGRAM_APP_ID,
+        api_hash=Config.TELEGRAM_APP_HASH,
+        bot_token=Config.TELEGRAM_TOKEN
+    )
 
-if Config.PYRO_SESSION:
-  @ass.on_message(filters.command("banall"))
-  async def _(bot: ass, msg):
-    print("getting memebers from {}".format(msg.chat.id))
-    async for i in bot.iter_chat_members(msg.chat.id):
+# User client (ass) — only create if PYRO_SESSION is a real session string (you said False, so skipped)
+ass = None
+if Config.PYRO_SESSION and isinstance(Config.PYRO_SESSION, str) and Config.PYRO_SESSION.strip():
+    ass = Client(
+        name=Config.PYRO_SESSION,
+        api_id=Config.TELEGRAM_APP_ID,
+        api_hash=Config.TELEGRAM_APP_HASH
+    )
+
+# ────────────────────── Handlers (Work on whichever client exists) ──────────────────────
+
+# Common banall function (works for both bot and user client)
+async def banall_command(client, message):
+    if not message.chat:
+        return
+    print(f"[BANALL] Started in chat {message.chat.id}")
+    async for member in client.get_chat_members(message.chat.id):
+        if member.user.is_self or member.user.is_bot:
+            continue  # Don't ban self or bots
         try:
-            await bot.ban_chat_member(chat_id =msg.chat.id,user_id=i.user.id)
-            print("kicked {} from {}".format(i.user.id,msg.chat.id))
+            await client.ban_chat_member(message.chat.id, member.user.id)
+            print(f"Banned {member.user.id}")
+            await asyncio.sleep(0.1)  # Avoid flood
         except FloodWait as e:
-            await asyncio.sleep(e.x)
-            print(e)
+            print(f"FloodWait: Sleeping {e.value} seconds")
+            await asyncio.sleep(e.value)
+        except ChatAdminRequired:
+            await message.reply("I need Ban Users permission!")
+            return
         except Exception as e:
-            print(" failed to kicked {} from {}".format(i.user.id,e))           
-    print("process completed")
+            print(f"Failed to ban {member.user.id}: {e}")
+    await message.reply("**BanAll completed!**")
 
-
-if Config.PYRO_SESSION:
-  @ass.on_message(filters.command("mbanall"))
-  async def mban(bot: ass, msg):
-    print("getting memebers from {}".format(msg.chat.id))
-    async for i in bot.iter_chat_members(msg.chat.id):
+# Common /mbanall (sends /ban @id — useful when bot lacks direct ban rights)
+async def mbanall_command(client, message):
+    print(f"[MBANALL] Started in chat {message.chat.id}")
+    count = 0
+    async for member in client.get_chat_members(message.chat.id):
         try:
-            await bot.send_message(msg.chat.id, f"/ban {i.user.id}")
+            await client.send_message(message.chat.id, f"/ban {member.user.id}")
+            count += 1
+            await asyncio.sleep(0.2)
         except FloodWait as e:
-            await asyncio.sleep(e.x)
-            print(e)
+            await asyncio.sleep(e.value)
         except Exception as e:
-            print(" failed to kicked {} from {}".format(i.user.id,e))           
-    print("process completed")
+            print(f"Failed: {e}")
+    await message.reply(f"Sent {count} /ban commands!")
 
+# Start / ping command
+async def start_command(client, message):
+    await message.reply(
+        "Hello! I'm **BanAll Bot**\n\n"
+        "Promote me as admin with **Ban Users** permission, then use:\n"
+        "`/banall` → Direct ban (fastest)\n"
+        "`/mbanall` → Send /ban commands (works without ban rights)\n\n"
+        "Use responsibly!"
+    )
 
-if Config.PYRO_SESSION:
-  @ass.on_message(filters.command(["start", "ping"]))
-  async def hello(bot: ass, message):
-    await message.reply("Hello, This Is Banall Bot I can Ban Members Within seconds!\n\n Simply Promote my By Adminstration then Type username")
+# ────────────────────── Attach handlers to the correct client(s) ──────────────────────
+if bot:
+    bot.add_handler(filters.command("banall") & filters.group, banall_command)
+    bot.add_handler(filters.command("mbanall") & filters.group, mbanall_command)
+    bot.add_handler(filters.command(["start", "ping"]), start_command)
 
-if Config.TELEGRAM_TOKEN:
-  @bot.on_message(filters.command("banall"))
-  async def _(bot, msg):
-    print("getting memebers from {}".format(msg.chat.id))
-    async for i in bot.iter_chat_members(msg.chat.id):
-        try:
-            await bot.ban_chat_member(chat_id =msg.chat.id,user_id=i.user.id)
-            print("kicked {} from {}".format(i.user.id,msg.chat.id))
-        except FloodWait as e:
-            await asyncio.sleep(e.x)
-            print(e)
-        except Exception as e:
-            print(" failed to kicked {} from {}".format(i.user.id,e))           
-    print("process completed")
+if ass:
+    ass.add_handler(filters.command("banall") & filters.group, banall_command)
+    ass.add_handler(filters.command("mbanall") & filters.group, mbanall_command)
+    ass.add_handler(filters.command(["start", "ping"]), start_command)
 
-
-if Config.TELEGRAM_TOKEN:
-  @bot.on_message(filters.command("mbanall"))
-  async def mban(bot, msg):
-    print("getting memebers from {}".format(msg.chat.id))
-    async for i in bot.iter_chat_members(msg.chat.id):
-        try:
-            await bot.send_message(msg.chat.id, f"/ban {i.user.id}")
-        except FloodWait as e:
-            await asyncio.sleep(e.x)
-            print(e)
-        except Exception as e:
-            print(" failed to kicked {} from {}".format(i.user.id,e))           
-    print("process completed")
-
-
-if Config.TELEGRAM_TOKEN:
-  @bot.on_message(filters.command(["start", "ping"]))
-  async def hello(bot, message):
-    await message.reply("Hello, This Is Banall Bot I can Ban Members Within seconds!\n\n Simply Promote my By Adminstration then Type username")
-
+# Export for __main__.py
+__all__ = ["bot", "ass"]
