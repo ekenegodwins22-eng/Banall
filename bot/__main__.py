@@ -1,55 +1,72 @@
-# bot/__main__.py
-import os
+# bot/__init__.py
 import asyncio
-from pyrogram import idle
-from . import bot, ass
+import logging
+from pyrogram import Client, filters
+from pyrogram.errors import FloodWait, ChatAdminRequired
+from .config import Config
 
-# ────── Tiny aiohttp health-check server (required for Koyeb HTTP health check) ──────
-from aiohttp import web
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("pyrogram").setLevel(logging.WARNING)
 
-async def health(request):
-    return web.Response(text="BanAll Bot is alive and ready to destroy!")
+# ────── Clients ──────
+bot = Client(
+    name="banall_bot",
+    api_id=Config.TELEGRAM_APP_ID,
+    api_hash=Config.TELEGRAM_APP_HASH,
+    bot_token=Config.TELEGRAM_TOKEN
+) if Config.TELEGRAM_TOKEN else None
 
-app = web.Application()
-app.router.add_get('/health', health)
+ass = None
+if Config.PYRO_SESSION and isinstance(Config.PYRO_SESSION, str) and Config.PYRO_SESSION.strip():
+    ass = Client(name=Config.PYRO_SESSION, api_id=Config.TELEGRAM_APP_ID, api_hash=Config.TELEGRAM_APP_HASH)
 
-async def web_server():
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get('PORT', 8000))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    print(f"Health server running on port {port} → /health")
+# ────── Command handlers (Pyrogram 2.0+ style) ──────
+@bot.on_message(filters.command(["start", "ping"]))
+async def start_cmd(client, message):
+    await message.reply(
+        "Hello! I'm **BanAll Bot**\n\n"
+        "Promote me as admin with **Ban Users** permission, then use:\n"
+        "`/banall` → Direct ban (fastest)\n"
+        "`/mbanall` → Send /ban commands\n\n"
+        "Use responsibly!"
+    )
 
-# ────── Safe start with session cleanup + retry (your proven fix) ──────
-async def safe_start(client):
-    session_file = f"{client.name}.session"
-    for attempt in range(1, 6):
+@bot.on_message(filters.command("banall") & filters.group)
+async def banall_cmd(client, message):
+    if not message.from_user:
+        return
+    await message.reply("**BanAll started…**")
+    count = 0
+    async for member in client.get_chat_members(message.chat.id):
+        if member.status in ("administrator", "creator") or member.user.is_self:
+            continue
         try:
-            if os.path.exists(session_file):
-                os.remove(session_file)
-                print(f"Deleted stale session: {session_file}")
-            await client.start()
-            print(f"{client.name} connected successfully!")
-            return
-        except Exception as e:
-            print(f"{client.name} attempt {attempt} failed: {e}")
-            if attempt < 5:
-                await asyncio.sleep(5 * attempt)
-    raise RuntimeError(f"Failed to start {client.name} after 5 attempts")
+            await client.ban_chat_member(message.chat.id, member.user.id)
+            count += 1
+            await asyncio.sleep(0.1)
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+        except:
+            pass
+    await message.reply(f"**BanAll completed! Banned {count} users.**")
 
-# ────── Main ──────
-async def main():
-    tasks = [web_server(), safe_start(bot)]
-    if ass:  # Only starts if PYRO_SESSION is set
-        tasks.append(safe_start(ass))
-    
-    await asyncio.gather(*tasks)
-    print("BanAll bot is now ONLINE and unstoppable!")
-    await idle()
+@bot.on_message(filters.command("mbanall") & filters.group)
+async def mbanall_cmd(client, message):
+    await message.reply("**mBanAll started…**")
+    count = 0
+    async for member in client.get_chat_members(message.chat.id):
+        try:
+            await client.send_message(message.chat.id, f"/ban {member.user.id}")
+            count += 1
+            await asyncio.sleep(0.2)
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+    await message.reply(f"**Sent {count} /ban commands!**")
 
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        print("Bot stopped gracefully.")
+# Optional: same handlers for ass (user client) — only if you ever enable PYRO_SESSION
+if ass:
+    ass.add_handler(filters.command(["start", "ping"]), start_cmd)
+    ass.add_handler(filters.command("banall") & filters.group, banall_cmd)
+    ass.add_handler(filters.command("mbanall") & filters.group, mbanall_cmd)
+
+__all__ = ["bot", "ass"]
